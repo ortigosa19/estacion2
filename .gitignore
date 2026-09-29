@@ -1,0 +1,7 @@
+*.zip
+.env
+.env.*
+node_modules/
+*.db
+*.sqlite
+*.sqlite3
