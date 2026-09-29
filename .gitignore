@@ -1,7 +1,6 @@
-*.zip
 .env
 .env.*
+!.env.example
 node_modules/
-*.db
-*.sqlite
-*.sqlite3
+*.zip
+db/*.db

@@ -1,6 +1,8 @@
 // server.js — sesión única + APIs Weather.com (WU) + lluvia YTD por meses
 // Node >=18 (fetch nativo). Listo para Railway.
 
+// Carga variables locales; Railway proporciona las suyas directamente.
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');

@@ -1,0 +1,9 @@
+ALFARNATE - Froggit / Weather Underground
+
+LOCAL: descomprime el ZIP, abre una terminal en prueba1-main, ejecuta npm install y npm start. Visita http://localhost:8080. El archivo .env contiene tu clave API; NO lo subas a GitHub ni lo compartas.
+
+RAILWAY: en Variables configura WU_API_KEY con tu clave y WU_STATION_ID=IALFAR42. El archivo .env se excluye con .gitignore.
+
+La clave fue compartida en una conversacion: es recomendable regenerarla y actualizar .env y Railway.
+
+La estacion puede tardar en proporcionar historicos; la prevision usa Open-Meteo.
