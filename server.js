@@ -225,6 +225,46 @@ app.get('/api/lluvia/mensual', async (req, res) => {
   }
 });
 
+/* ============ Lluvia mensual de todo el año desde CumulusMX ============ */
+app.get('/api/lluvia/anual', (req, res) => {
+  try {
+    const year = Number(req.query.year);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({
+        error: 'params_invalid',
+        detalle: 'year debe ser válido'
+      });
+    }
+
+    const meses = [];
+    for (let month = 1; month <= 12; month++) {
+      const key = `${year}-${String(month).padStart(2, '0')}`;
+      const dato = CUMULUS_MONTHLY.get(key);
+
+      meses.push({
+        year,
+        month,
+        total_mm: dato ? dato.total_mm : null,
+        recibido: dato ? dato.recibido : null,
+        origen: dato ? dato.origen : 'CumulusMX MonthRainfall'
+      });
+    }
+
+    return res.json({
+      year,
+      meses,
+      recibidos: meses.filter(m => m.total_mm !== null).length,
+      origen: 'CumulusMX MonthRainfall'
+    });
+  } catch (e) {
+    console.error('Error /api/lluvia/anual:', e);
+    return res.status(500).json({
+      error: 'cumulus_annual_failed',
+      detalle: String(e.message || e)
+    });
+  }
+});
+
 /* ============ Lluvia acumulada (YTD) por meses (evita 502) ============ */
 app.get('/api/lluvia/total/year', async (req, res) => {
   try {
