@@ -110,6 +110,48 @@ app.get('/api/weather/history', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error:'Weather history proxy failed' }); }
 });
 
+/* ============ Recepción de lluvia desde CumulusMX ============ */
+/*
+  CumulusMX (en el PC local) envía el valor de MonthRainfall a Render.
+  Se mantiene en memoria: CumulusMX lo volverá a enviar automáticamente
+  en cada intervalo, por lo que un reinicio de Render se recupera solo.
+*/
+const CUMULUS_MONTHLY = new Map();
+
+app.get('/api/cumulus/lluvia', (req, res) => {
+  try {
+    const year = Number(req.query.year);
+    const month = Number(req.query.month);
+    const rain = Number(String(req.query.rain ?? '').replace(',', '.'));
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100 ||
+        !Number.isInteger(month) || month < 1 || month > 12 ||
+        !Number.isFinite(rain) || rain < 0) {
+      return res.status(400).json({
+        error: 'params_invalid',
+        detalle: 'year, month y rain deben ser válidos'
+      });
+    }
+
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    const dato = {
+      year,
+      month,
+      total_mm: Number(rain.toFixed(2)),
+      recibido: new Date().toISOString(),
+      origen: 'CumulusMX MonthRainfall'
+    };
+
+    CUMULUS_MONTHLY.set(key, dato);
+
+    console.log(`[CumulusMX] lluvia ${key}: ${dato.total_mm} mm`);
+    return res.json({ ok: true, ...dato });
+  } catch (e) {
+    console.error('Error /api/cumulus/lluvia:', e);
+    return res.status(500).json({ error: 'cumulus_receive_failed' });
+  }
+});
+
 /* ============ Lluvia mensual desde CumulusMX ============ */
 app.get('/api/lluvia/mensual', async (req, res) => {
   try {
@@ -122,8 +164,23 @@ app.get('/api/lluvia/mensual', async (req, res) => {
       return res.status(400).json({ error: 'params_invalid', detalle: 'year y month son obligatorios y válidos' });
     }
 
-    // CumulusMX expone oficialmente MonthRainfall y permite indicar año y mes.
-    // Usamos POST a process.txt para evitar problemas de codificación del webtag.
+    // Primero usamos el último dato que CumulusMX ha enviado a Render.
+    // CumulusMX lo actualiza automáticamente en cada intervalo.
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    const pushed = CUMULUS_MONTHLY.get(key);
+    if (pushed) {
+      return res.json(pushed);
+    }
+
+    // No hay todavía un dato recibido desde CumulusMX.
+    // No intentamos acceder a localhost:8998 desde Render porque localhost
+    // en Render NO es el PC donde está instalado CumulusMX.
+    return res.status(503).json({
+      error: 'cumulus_waiting',
+      detalle: 'Todavía no se ha recibido la lluvia mensual desde CumulusMX'
+    });
+
+    // Código antiguo de acceso directo a CumulusMX, conservado como referencia:
     const tagUrl = `${base}/api/tags/process.txt`;
     const tagBody = `<#MonthRainfall y="${year}" m="${month}">`;
 
