@@ -110,6 +110,41 @@ app.get('/api/weather/history', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error:'Weather history proxy failed' }); }
 });
 
+/* ============ Diagnóstico CumulusMX ============ */
+app.get('/api/cumulus/test', async (_req, res) => {
+  const base = (process.env.CUMULUS_URL || 'http://localhost:8998').replace(/\/+$/, '');
+  const url = `${base}/api/tags/process.json?rc&rmonth`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const r = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json,text/plain,*/*' }
+    });
+    const body = await r.text();
+
+    return res.status(r.ok ? 200 : 502).json({
+      ok: r.ok,
+      cumulus_url: base,
+      endpoint: url,
+      http: r.status,
+      respuesta: body
+    });
+  } catch (e) {
+    return res.status(502).json({
+      ok: false,
+      cumulus_url: base,
+      endpoint: url,
+      error: String(e.message || e),
+      detalle: 'El servidor no puede alcanzar CumulusMX. Si este servidor está en Railway, localhost NO es el PC donde está CumulusMX.'
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
 /* ============ Lluvia mensual desde CumulusMX ============ */
 app.get('/api/lluvia/mensual', async (req, res) => {
   try {
@@ -127,20 +162,34 @@ app.get('/api/lluvia/mensual', async (req, res) => {
     const tagUrl = `${base}/api/tags/process.txt`;
     const tagBody = `<#MonthRainfall y="${year}" m="${month}">`;
 
-    const tagResponse = await fetch(tagUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Accept': 'text/plain,text/html,*/*'
-      },
-      body: tagBody
-    });
+    // CumulusMX admite POST en /api/tags/process.txt para procesar
+    // webtags con parámetros (por ejemplo MonthRainfall y=AAAA m=MM).
+    // Añadimos timeout y devolvemos el motivo real del fallo para poder
+    // distinguir "Cumulus apagado" de un valor inválido.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    let tagResponse;
+    try {
+      tagResponse = await fetch(tagUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Accept': 'text/plain,text/html,*/*'
+        },
+        body: tagBody,
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     const tagText = (await tagResponse.text()).trim();
     if (!tagResponse.ok) {
       return res.status(502).json({
         error: 'cumulus_unavailable',
-        detalle: `CumulusMX respondió HTTP ${tagResponse.status}`
+        detalle: `CumulusMX respondió HTTP ${tagResponse.status}`,
+        cumulus_url: base
       });
     }
 
@@ -276,5 +325,6 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
+
 
 
