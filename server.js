@@ -62,25 +62,76 @@ const UA = process.env.USER_AGENT ||
 
 app.get('/api/weather/current', async (req, res) => {
   try {
-    const apiKey = process.env.WEATHER_API_KEY || process.env.WU_API_KEY;
-    const stationId = req.query.stationId || process.env.WU_STATION_ID;
-    const units = req.query.units || 'm';
-    if (!apiKey || !stationId) return res.status(400).json({ error:'config_missing', detalle:'Faltan WEATHER_API_KEY/WU_API_KEY o WU_STATION_ID' });
+    const base = (process.env.CUMULUS_URL || 'http://localhost:8998').replace(/\/+$/, '');
+    const url = `${base}/websitedataT.json`;
 
-    const url = new URL('https://api.weather.com/v2/pws/observations/current');
-    url.searchParams.set('stationId', stationId);
-    url.searchParams.set('format', 'json');
-    url.searchParams.set('units', units);
-    url.searchParams.set('apiKey', apiKey);
-    url.searchParams.set('numericPrecision', 'decimal');
+    const r = await fetch(url, {
+      headers: {
+        'Accept': 'application/json,text/plain,*/*',
+        'User-Agent': UA
+      }
+    });
 
-    const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept':'application/json,text/plain,*/*', 'Accept-Language':'es-ES,es;q=0.9' }});
-    const ct = (r.headers.get('content-type') || '').toLowerCase();
     const body = await r.text();
-    if (!r.ok) { console.error('Upstream /current', r.status, ct, body.slice(0,300)); return res.status(r.status).json({ error:'weather.com denied', status:r.status }); }
-    if (!ct.includes('application/json')) return res.status(502).json({ error:'Invalid response from weather.com' });
-    res.set('Cache-Control','public, max-age=60').type('application/json').send(body);
-  } catch (e) { console.error(e); res.status(500).json({ error:'Weather proxy failed' }); }
+
+    if (!r.ok) {
+      return res.status(502).json({
+        error: 'cumulus_unavailable',
+        detalle: `CumulusMX respondió HTTP ${r.status}`
+      });
+    }
+
+    try {
+      const data = JSON.parse(body);
+      res.set('Cache-Control', 'no-store');
+      return res.json(data);
+    } catch (e) {
+      return res.status(502).json({
+        error: 'cumulus_invalid_json',
+        detalle: 'websitedataT.json no contiene JSON válido'
+      });
+    }
+  } catch (e) {
+    console.error('Error CumulusMX:', e);
+    return res.status(500).json({
+      error: 'cumulus_connection_failed',
+      detalle: String(e.message || e)
+    });
+  }
+});
+
+/* ============ Índice UV estimado (Open-Meteo) ============ */
+app.get('/api/uv/current', async (req, res) => {
+  try {
+    const lat = 36.985;
+    const lon = -4.223;
+
+    const url =
+      `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${lat}` +
+      `&longitude=${lon}` +
+      `&current=uv_index` +
+      `&timezone=Europe%2FMadrid`;
+
+    const r = await fetch(url);
+    const data = await r.json();
+
+    if (!r.ok) {
+      return res.status(502).json({ error: 'uv_unavailable' });
+    }
+
+    return res.json({
+      uv: data?.current?.uv_index ?? null,
+      origen: 'Open-Meteo',
+      time: data?.current?.time ?? null
+    });
+  } catch (e) {
+    console.error('Error UV:', e);
+    return res.status(500).json({
+      error: 'uv_failed',
+      detalle: String(e.message || e)
+    });
+  }
 });
 
 app.get('/api/weather/history', async (req, res) => {
@@ -371,5 +422,5 @@ app.get('/api/lluvia/total/year', async (req, res) => {
 /* ============ Arranque ============ */
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
-  console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
+  console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/uv/current, /api/lluvia/total/year)`)
 );
