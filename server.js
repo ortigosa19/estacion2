@@ -110,48 +110,6 @@ app.get('/api/weather/history', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error:'Weather history proxy failed' }); }
 });
 
-/* ============ Recepción de lluvia desde CumulusMX ============ */
-/*
-  CumulusMX (en el PC local) envía el valor de MonthRainfall a Render.
-  Se mantiene en memoria: CumulusMX lo volverá a enviar automáticamente
-  en cada intervalo, por lo que un reinicio de Render se recupera solo.
-*/
-const CUMULUS_MONTHLY = new Map();
-
-app.get('/api/cumulus/lluvia', (req, res) => {
-  try {
-    const year = Number(req.query.year);
-    const month = Number(req.query.month);
-    const rain = Number(String(req.query.rain ?? '').replace(',', '.'));
-
-    if (!Number.isInteger(year) || year < 2000 || year > 2100 ||
-        !Number.isInteger(month) || month < 1 || month > 12 ||
-        !Number.isFinite(rain) || rain < 0) {
-      return res.status(400).json({
-        error: 'params_invalid',
-        detalle: 'year, month y rain deben ser válidos'
-      });
-    }
-
-    const key = `${year}-${String(month).padStart(2, '0')}`;
-    const dato = {
-      year,
-      month,
-      total_mm: Number(rain.toFixed(2)),
-      recibido: new Date().toISOString(),
-      origen: 'CumulusMX MonthRainfall'
-    };
-
-    CUMULUS_MONTHLY.set(key, dato);
-
-    console.log(`[CumulusMX] lluvia ${key}: ${dato.total_mm} mm`);
-    return res.json({ ok: true, ...dato });
-  } catch (e) {
-    console.error('Error /api/cumulus/lluvia:', e);
-    return res.status(500).json({ error: 'cumulus_receive_failed' });
-  }
-});
-
 /* ============ Lluvia mensual desde CumulusMX ============ */
 app.get('/api/lluvia/mensual', async (req, res) => {
   try {
@@ -164,23 +122,8 @@ app.get('/api/lluvia/mensual', async (req, res) => {
       return res.status(400).json({ error: 'params_invalid', detalle: 'year y month son obligatorios y válidos' });
     }
 
-    // Primero usamos el último dato que CumulusMX ha enviado a Render.
-    // CumulusMX lo actualiza automáticamente en cada intervalo.
-    const key = `${year}-${String(month).padStart(2, '0')}`;
-    const pushed = CUMULUS_MONTHLY.get(key);
-    if (pushed) {
-      return res.json(pushed);
-    }
-
-    // No hay todavía un dato recibido desde CumulusMX.
-    // No intentamos acceder a localhost:8998 desde Render porque localhost
-    // en Render NO es el PC donde está instalado CumulusMX.
-    return res.status(503).json({
-      error: 'cumulus_waiting',
-      detalle: 'Todavía no se ha recibido la lluvia mensual desde CumulusMX'
-    });
-
-    // Código antiguo de acceso directo a CumulusMX, conservado como referencia:
+    // CumulusMX expone oficialmente MonthRainfall y permite indicar año y mes.
+    // Usamos POST a process.txt para evitar problemas de codificación del webtag.
     const tagUrl = `${base}/api/tags/process.txt`;
     const tagBody = `<#MonthRainfall y="${year}" m="${month}">`;
 
@@ -220,46 +163,6 @@ app.get('/api/lluvia/mensual', async (req, res) => {
     console.error('Error /api/lluvia/mensual:', e);
     return res.status(502).json({
       error: 'cumulus_connection_failed',
-      detalle: String(e.message || e)
-    });
-  }
-});
-
-/* ============ Lluvia mensual de todo el año desde CumulusMX ============ */
-app.get('/api/lluvia/anual', (req, res) => {
-  try {
-    const year = Number(req.query.year);
-    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-      return res.status(400).json({
-        error: 'params_invalid',
-        detalle: 'year debe ser válido'
-      });
-    }
-
-    const meses = [];
-    for (let month = 1; month <= 12; month++) {
-      const key = `${year}-${String(month).padStart(2, '0')}`;
-      const dato = CUMULUS_MONTHLY.get(key);
-
-      meses.push({
-        year,
-        month,
-        total_mm: dato ? dato.total_mm : null,
-        recibido: dato ? dato.recibido : null,
-        origen: dato ? dato.origen : 'CumulusMX MonthRainfall'
-      });
-    }
-
-    return res.json({
-      year,
-      meses,
-      recibidos: meses.filter(m => m.total_mm !== null).length,
-      origen: 'CumulusMX MonthRainfall'
-    });
-  } catch (e) {
-    console.error('Error /api/lluvia/anual:', e);
-    return res.status(500).json({
-      error: 'cumulus_annual_failed',
       detalle: String(e.message || e)
     });
   }
@@ -374,41 +277,4 @@ app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
 
-    }
-
-    const lista = Array.from(perDay.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    const total = lista.reduce((acc, [, mm]) => acc + (Number.isFinite(mm) ? mm : 0), 0);
-
-    if (req.query.debug === '1') {
-      return res.json({
-        year: YEAR,
-        desde: `${YEAR}-01-01`,
-        hasta: `${YEAR}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-        dias_contados: lista.length,
-        total_mm: Number(total.toFixed(2)),
-        muestra: lista.slice(-10).map(([fecha, mm]) => ({ fecha, mm })),
-      });
-    }
-
-    return res.json({
-      year: YEAR,
-      desde: `${YEAR}-01-01`,
-      hasta: `${YEAR}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-      dias_contados: lista.length,
-      total_mm: Number(total.toFixed(2)),
-      origen: 'WU history/daily (mensual)'
-    });
-
-  } catch (e) {
-    console.error('Error /api/lluvia/total/year:', e);
-    return res.status(500).json({ error:'calc_failed', detalle:String(e.message || e) });
-  }
-});
-
-
-/* ============ Arranque ============ */
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () =>
-  console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/uv/current, /api/lluvia/total/year)`)
-);
 
