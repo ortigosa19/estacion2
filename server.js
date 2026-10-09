@@ -145,6 +145,39 @@ app.get('/api/cumulus/test', async (_req, res) => {
   }
 });
 
+/* ============ Recepción segura de lluvia enviada por el PC CumulusMX ============ */
+const RAIN_CACHE_FILE = path.join(DB_DIR, 'lluvia-cumulus.json');
+function readRainCache() {
+  try { return JSON.parse(fs.readFileSync(RAIN_CACHE_FILE, 'utf8')); }
+  catch { return {}; }
+}
+function writeRainCache(data) {
+  fs.writeFileSync(RAIN_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+app.post('/api/cumulus/lluvia', (req, res) => {
+  const expected = process.env.CUMULUS_PUSH_TOKEN;
+  const supplied = String(req.get('x-cumulus-token') || req.body?.token || '');
+  if (!expected) return res.status(503).json({ error: 'push_not_configured', detalle: 'Falta configurar CUMULUS_PUSH_TOKEN en Render.' });
+  if (supplied.length !== expected.length || supplied !== expected) return res.status(401).json({ error: 'unauthorized' });
+  const year = Number(req.body?.year);
+  const month = Number(req.body?.month);
+  const total = Number(req.body?.total_mm);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12 || !Number.isFinite(total) || total < 0 || total > 10000) {
+    return res.status(400).json({ error: 'invalid_data', detalle: 'Se requiere year, month y total_mm válidos.' });
+  }
+  const cache = readRainCache();
+  const key = `${year}-${String(month).padStart(2, '0')}`;
+  cache[key] = { year, month, total_mm: Number(total.toFixed(2)), recibido: new Date().toISOString(), origen: 'CumulusMX PC' };
+  try { writeRainCache(cache); }
+  catch (e) { return res.status(500).json({ error: 'save_failed', detalle: String(e.message || e) }); }
+  return res.json({ ok: true, guardado: key, total_mm: cache[key].total_mm });
+});
+
+app.get('/api/cumulus/lluvia', (_req, res) => {
+  const cache = readRainCache();
+  res.json({ ok: true, datos: Object.values(cache).sort((a, b) => a.year - b.year || a.month - b.month) });
+});
+
 /* ============ Lluvia mensual desde CumulusMX ============ */
 app.get('/api/lluvia/mensual', async (req, res) => {
   try {
@@ -156,6 +189,12 @@ app.get('/api/lluvia/mensual', async (req, res) => {
         !Number.isInteger(month) || month < 1 || month > 12) {
       return res.status(400).json({ error: 'params_invalid', detalle: 'year y month son obligatorios y válidos' });
     }
+
+    // Primero usa el dato enviado por el PC de la estación; así Render no necesita
+    // acceder directamente al localhost del otro ordenador.
+    const cache = readRainCache();
+    const cached = cache[`${year}-${String(month).padStart(2, '0')}`];
+    if (cached) return res.json({ ...cached, origen: 'CumulusMX PC', modo: 'recibido' });
 
     // CumulusMX expone oficialmente MonthRainfall y permite indicar año y mes.
     // Usamos POST a process.txt para evitar problemas de codificación del webtag.
