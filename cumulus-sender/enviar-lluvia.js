@@ -1,5 +1,5 @@
 // Agente para el PC donde funciona CumulusMX. Requiere Node.js 18 o superior.
-// Variables: RENDER_URL=https://estacion2.onrender.com, CUMULUS_PUSH_TOKEN=ceca5e13976e49d38a5e13976e79d36b
+// Variables: RENDER_URL=https://estacion2.onrender.com, CUMULUS_PUSH_TOKEN='ceca5e13976e49d38a5e13976e79d36b'
 const CUMULUS_URL = (process.env.CUMULUS_URL || 'http://127.0.0.1:8998').replace(/\/+$/, '');
 const RENDER_URL = (process.env.RENDER_URL || 'https://estacion2.onrender.com').replace(/\/+$/, '');
 const TOKEN = process.env.CUMULUS_PUSH_TOKEN || '';
