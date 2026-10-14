@@ -76,6 +76,11 @@
     100% { transform: rotate(360deg); }
   }
 </style>
+
+<style>
+/* Botón de historial oculto; se conserva su HTML y JavaScript. */
+#btn-historial { display: none !important; }
+</style>
 </head>
 <body class="px-2 sm:px-4">
   <h1 class="text-4xl font-bold text-white mb-4">ALFARNATE</h1>
@@ -118,8 +123,8 @@
     <canvas id="grafico-lluvia" width="400" height="200"></canvas>
   </div>
 
-  <!-- Botón historial oculto visualmente; se conserva el código y la funcionalidad -->
-  <div class="weather-screen" style="display: none;">
+  <!-- Botón historial -->
+  <div class="weather-screen">
     <button id="btn-historial" class="top-right-button mt-4 w-full sm:w-auto">📊 Ver Historial</button>
   </div>
 
@@ -280,10 +285,10 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       const mm = Number(data?.total_mm ?? 0);
-      el.textContent = (Number.isFinite(mm) ? mm : 0).toFixed(1) + ' L/m2';
+      el.textContent = (Number.isFinite(mm) ? mm : 0).toFixed(1) + ' mm';
 
       if (data?.desde && data?.hasta) {
-        rangoEl.textContent = `(${data.year}: ${data.desde} → ${data.hasta})`;
+        rangoEl.textContent = `(del ${data.desde} al ${data.hasta})`;
       } else {
         rangoEl.textContent = '(año actual)';
       }
@@ -312,16 +317,6 @@
 
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
 
 
 
