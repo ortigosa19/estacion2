@@ -310,11 +310,44 @@ app.get('/api/lluvia/total/year', (req, res) => {
 });
 
 
+/* ============ Índice UV estimado de Open-Meteo ============ */
+// La estación WH1080 SE no mide UV. Se obtiene un valor estimado para Alfarnate.
+app.get('/api/uv/current', async (_req, res) => {
+  try {
+    const lat = Number(process.env.UV_LAT || 36.985);
+    const lon = Number(process.env.UV_LON || -4.223);
+    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    url.searchParams.set('latitude', String(lat));
+    url.searchParams.set('longitude', String(lon));
+    url.searchParams.set('current', 'uv_index');
+    url.searchParams.set('timezone', 'Europe/Madrid');
+
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const body = await r.text();
+    if (!r.ok) {
+      console.error('Open-Meteo UV:', r.status, body.slice(0, 300));
+      return res.status(502).json({ error: 'uv_unavailable' });
+    }
+    const data = JSON.parse(body);
+    const uv = data?.current?.uv_index;
+    res.set('Cache-Control', 'no-store').json({
+      uv: Number.isFinite(Number(uv)) ? Number(uv) : null,
+      origen: 'Open-Meteo (estimado)',
+      time: data?.current?.time || null
+    });
+  } catch (e) {
+    console.error('Error /api/uv/current:', e);
+    res.status(500).json({ error: 'uv_failed' });
+  }
+});
+
 /* ============ Arranque ============ */
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
+
+
 
 
 
