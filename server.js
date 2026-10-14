@@ -37,7 +37,7 @@ if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
 /* ============ Body + estáticos ============ */
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
 app.use(express.static(PUBLIC_DIR));
 
 /* ============ Healthcheck ============ */
@@ -176,6 +176,43 @@ app.post('/api/cumulus/lluvia', (req, res) => {
 app.get('/api/cumulus/lluvia', (_req, res) => {
   const cache = readRainCache();
   res.json({ ok: true, datos: Object.values(cache).sort((a, b) => a.year - b.year || a.month - b.month) });
+});
+
+/* ============ Historial detallado enviado por CumulusMX ============ */
+const HISTORY_DIR = path.join(DB_DIR, 'cumulus-historial');
+if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
+function historyFile(year) { return path.join(HISTORY_DIR, `historial-${year}.json`); }
+function readHistory(year) {
+  try { const d = JSON.parse(fs.readFileSync(historyFile(year), 'utf8')); return Array.isArray(d) ? d : []; }
+  catch { return []; }
+}
+app.post('/api/cumulus/historial', (req, res) => {
+  const expected = process.env.CUMULUS_PUSH_TOKEN;
+  const supplied = String(req.get('x-cumulus-token') || req.body?.token || '');
+  if (!expected) return res.status(503).json({ error: 'push_not_configured', detalle: 'Falta configurar CUMULUS_PUSH_TOKEN en Render.' });
+  if (supplied.length !== expected.length || supplied !== expected) return res.status(401).json({ error: 'unauthorized' });
+  const year = Number(req.body?.year);
+  const rows = req.body?.datos;
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Array.isArray(rows) || rows.length > 50000) {
+    return res.status(400).json({ error: 'invalid_data', detalle: 'Se requiere un año válido y un array datos (máximo 50000 registros).' });
+  }
+  const valid = rows.filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(String(x.fecha || '')) && String(x.fecha).startsWith(`${year}-`) && /^\d{2}:\d{2}(?::\d{2})?$/.test(String(x.hora || '')))
+    .map(x => ({ fecha: String(x.fecha), hora: String(x.hora), temperatura: numOrNull(x.temperatura), lluvia: numOrNull(x.lluvia), viento: numOrNull(x.viento), racha: numOrNull(x.racha), humedad: numOrNull(x.humedad), presion: numOrNull(x.presion) }));
+  function numOrNull(v) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
+  if (!valid.length && rows.length) return res.status(400).json({ error: 'no_valid_records', detalle: 'No se reconocieron registros válidos.' });
+  try {
+    const byKey = new Map(readHistory(year).map(x => [`${x.fecha} ${x.hora}`, x]));
+    for (const row of valid) byKey.set(`${row.fecha} ${row.hora}`, row);
+    const all = Array.from(byKey.values()).sort((a,b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+    fs.writeFileSync(historyFile(year), JSON.stringify(all), 'utf8');
+    return res.json({ ok: true, year, recibidos: valid.length, total: all.length });
+  } catch (e) { return res.status(500).json({ error: 'save_failed', detalle: String(e.message || e) }); }
+});
+app.get('/api/cumulus/historial', (req, res) => {
+  const year = Number(req.query.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) return res.status(400).json({ error: 'year_invalid', detalle: 'Indica year=AAAA.' });
+  const datos = readHistory(year);
+  res.set('Cache-Control', 'no-store').json({ ok: true, year, desde: `${year}-01-01`, hasta: `${year}-12-31`, total: datos.length, datos });
 });
 
 /* ============ Lluvia mensual desde CumulusMX ============ */
@@ -346,6 +383,9 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
+
+
+
 
 
 
