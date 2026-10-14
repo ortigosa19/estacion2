@@ -1,52 +1,23 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Historial ALFARNATE</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  body{background:#202c3b;color:#e2e8f0;font-family:Arial,sans-serif;min-height:100vh}
-  .panel{background:#0b1220;border:1px solid #164e63;border-radius:16px}
-  .btn{background:#00bfff;color:#07111d;font-weight:700;padding:10px 16px;border-radius:8px}
-  th,td{padding:10px 12px;border-bottom:1px solid #334155;text-align:left;white-space:nowrap}
-  th{color:#67e8f9}
-</style>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historial meteorológico ALFARNATE</title>
+<script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>body{background:#172335;color:#e2e8f0;font-family:Arial,sans-serif;min-height:100vh}.panel{background:#0b1220;border:1px solid #164e63;border-radius:16px}.btn,select{background:#06b6d4;color:#07111d;font-weight:700;padding:9px 14px;border-radius:8px}select{background:#e2e8f0}th,td{padding:9px 11px;border-bottom:1px solid #334155;text-align:left;white-space:nowrap}th{color:#67e8f9}.chartbox{height:300px;position:relative}</style>
 </head>
-<body class="p-4 md:p-8">
-<main class="max-w-4xl mx-auto">
-  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
-    <div><h1 class="text-3xl font-bold text-cyan-300">📜 Historial ALFARNATE</h1><p class="text-slate-300 mt-2">Lluvia mensual recibida desde CumulusMX.</p></div>
-    <button class="btn" onclick="location.href='/'">← Volver a la estación</button>
-  </div>
-  <section class="panel p-4 md:p-6">
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <h2 class="text-xl font-bold">Precipitación mensual</h2>
-      <button id="actualizar" class="btn">Actualizar</button>
-    </div>
-    <p id="estado" class="text-slate-300 mb-4">Consultando los datos de CumulusMX...</p>
-    <div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Año</th><th>Mes</th><th>Lluvia (mm)</th><th>Última recepción</th></tr></thead><tbody id="filas"></tbody></table></div>
-    <p class="text-xs text-slate-400 mt-4">Esta vista muestra los totales mensuales que el agente de CumulusMX ha enviado a Render. Los registros detallados por hora o por día todavía requieren enviar los archivos de datos de CumulusMX al servidor.</p>
-  </section>
-</main>
-<script>
-const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-async function cargar(){
- const estado=document.getElementById('estado'), filas=document.getElementById('filas');
- estado.textContent='Consultando los datos de CumulusMX...'; filas.innerHTML='';
- try{
-  const r=await fetch('/api/cumulus/lluvia',{cache:'no-store'});
-  const d=await r.json();
-  if(!r.ok||!Array.isArray(d.datos)) throw new Error(d.detalle||d.error||'Respuesta no válida');
-  const datos=d.datos.slice().sort((a,b)=>b.year-a.year||b.month-a.month);
-  if(!datos.length){estado.textContent='Todavía no hay datos de lluvia recibidos desde CumulusMX.';return;}
-  for(const x of datos){const tr=document.createElement('tr');
-   [x.year,meses[(x.month||1)-1]||x.month,Number(x.total_mm).toLocaleString('es-ES',{maximumFractionDigits:2}),x.recibido?new Date(x.recibido).toLocaleString('es-ES'):'—'].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.appendChild(td)});filas.appendChild(tr);
-  }
-  estado.textContent=`${datos.length} meses recibidos desde CumulusMX.`;
- }catch(e){estado.textContent='No se pudo consultar el historial: '+e.message;}
-}
-document.getElementById('actualizar').addEventListener('click',cargar);cargar();
-</script>
-</body>
-</html>
+<body class="p-4 md:p-8"><main class="max-w-6xl mx-auto">
+<header class="flex flex-wrap items-center justify-between gap-3 mb-6"><div><h1 class="text-3xl font-bold text-cyan-300">📜 Historial ALFARNATE</h1><p class="text-slate-300 mt-2">Temperatura, lluvia y viento registrados por CumulusMX.</p></div><button class="btn" onclick="location.href='/'">← Volver a la estación</button></header>
+<section class="panel p-4 md:p-6 mb-5"><div class="flex flex-wrap items-center gap-3"><label for="year">Año:</label><select id="year"></select><button class="btn" id="actualizar">Consultar año completo</button></div><p class="text-slate-300 mt-3" id="estado" aria-live="polite">Consultando registros históricos...</p><p class="text-sm text-slate-400 mt-1" id="rango"></p></section>
+<div class="grid md:grid-cols-2 gap-5 mb-5"><section class="panel p-4"><h2 class="font-bold text-xl mb-3">Temperatura (°C)</h2><div class="chartbox"><canvas id="tempChart"></canvas></div></section><section class="panel p-4"><h2 class="font-bold text-xl mb-3">Viento y rachas (km/h)</h2><div class="chartbox"><canvas id="windChart"></canvas></div></section><section class="panel p-4 md:col-span-2"><h2 class="font-bold text-xl mb-3">Lluvia registrada (mm)</h2><div class="chartbox"><canvas id="rainChart"></canvas></div><p class="text-xs text-slate-400 mt-2">La lluvia mostrada corresponde al campo disponible en los registros enviados por CumulusMX; puede ser lluvia acumulada del día en cada observación.</p></section></div>
+<section class="panel p-4 md:p-6"><h2 class="text-xl font-bold mb-3">Registros por fecha y hora</h2><div class="overflow-x-auto"><table class="w-full"><thead><tr><th>Fecha</th><th>Hora</th><th>Temperatura °C</th><th>Lluvia mm</th><th>Viento km/h</th><th>Racha km/h</th><th>Humedad %</th><th>Presión hPa</th></tr></thead><tbody id="filas"></tbody></table></div><p id="paginacion" class="text-slate-300 mt-3"></p><div class="flex gap-2 mt-3"><button class="btn" id="anterior">Anterior</button><button class="btn" id="siguiente">Siguiente</button></div></section>
+</main><script>
+const yearEl=document.getElementById('year'), estado=document.getElementById('estado'), filas=document.getElementById('filas');let datos=[],pagina=0;const POR_PAGINA=100;let charts={};
+const actual=new Date().getFullYear();for(let y=actual;y>=actual-10;y--){const o=document.createElement('option');o.value=y;o.textContent=y;if(y===actual)o.selected=true;yearEl.appendChild(o)}
+function fmt(v,d=1){return v===null||v===undefined||v===''||!Number.isFinite(Number(v))?'—':Number(v).toLocaleString('es-ES',{maximumFractionDigits:d})}
+function chart(id,label,labels,values,type='line'){if(charts[id])charts[id].destroy();charts[id]=new Chart(document.getElementById(id),{type,data:{labels,datasets:[{label,data:values,borderWidth:2,pointRadius:0,spanGaps:true,tension:.15}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{x:{ticks:{color:'#cbd5e1',maxTicksLimit:12}},y:{ticks:{color:'#cbd5e1'}}},plugins:{legend:{labels:{color:'#e2e8f0'}}}}})}
+function dibujar(){const labels=datos.map(x=>`${x.fecha} ${x.hora}`);chart('tempChart','Temperatura °C',labels,datos.map(x=>x.temperatura));chart('windChart','Viento',labels,datos.map(x=>x.viento));if(charts.rainChart)charts.rainChart.destroy();charts.rainChart=new Chart(document.getElementById('rainChart'),{type:'line',data:{labels,datasets:[{label:'Lluvia (mm)',data:datos.map(x=>x.lluvia),borderWidth:2,pointRadius:0,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{x:{ticks:{color:'#cbd5e1',maxTicksLimit:16}},y:{beginAtZero:true,ticks:{color:'#cbd5e1'}}},plugins:{legend:{labels:{color:'#e2e8f0'}}}}});}
+function tabla(){filas.innerHTML='';const total=Math.ceil(datos.length/POR_PAGINA);const inicio=pagina*POR_PAGINA;for(const x of datos.slice(inicio,inicio+POR_PAGINA)){const tr=document.createElement('tr');[x.fecha,x.hora,fmt(x.temperatura),fmt(x.lluvia),fmt(x.viento),fmt(x.racha),fmt(x.humedad,0),fmt(x.presion,1)].forEach(v=>{const td=document.createElement('td');td.textContent=v;tr.appendChild(td)});filas.appendChild(tr)}document.getElementById('paginacion').textContent=datos.length?`Mostrando ${inicio+1}–${Math.min(inicio+POR_PAGINA,datos.length)} de ${datos.length} registros.`:'No hay registros para mostrar.';document.getElementById('anterior').disabled=pagina<=0;document.getElementById('siguiente').disabled=pagina>=total-1}
+async function cargar(){const year=Number(yearEl.value);estado.textContent='Consultando los registros de CumulusMX en Render…';filas.innerHTML='';try{const r=await fetch(`/api/cumulus/historial?year=${year}`,{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.detalle||d.error||`HTTP ${r.status}`);datos=(d.datos||[]).sort((a,b)=>`${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));pagina=0;document.getElementById('rango').textContent=`Periodo consultado: 01/01/${year} – 31/12/${year}.`;if(!datos.length){estado.textContent=`Render no tiene registros históricos de ${year} todavía. Hay que comprobar el agente de CumulusMX y la carpeta de logs.`;for(const id of ['tempChart','windChart','rainChart'])if(charts[id]){charts[id].destroy();delete charts[id]}tabla();return}estado.textContent=`${datos.length.toLocaleString('es-ES')} registros históricos recibidos para ${year}.`;dibujar();tabla()}catch(e){estado.textContent='No se pudo consultar el historial: '+e.message+' Comprueba que Render haya terminado el despliegue.'}}
+document.getElementById('actualizar').addEventListener('click',cargar);document.getElementById('anterior').addEventListener('click',()=>{if(pagina>0){pagina--;tabla()}});document.getElementById('siguiente').addEventListener('click',()=>{if((pagina+1)*POR_PAGINA<datos.length){pagina++;tabla()}});cargar();
+</script></body></html>
