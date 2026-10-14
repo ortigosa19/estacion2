@@ -1,5 +1,5 @@
-// Agente local CumulusMX -> Render. Requiere Node.js 18 o superior.
-// Env: CUMULUS_PUSH_TOKEN, RENDER_URL y opcional CUMULUS_DATA_DIR (por defecto C:\\CumulusMX\\data).
+// Agente CumulusMX -> Render: lluvia mensual + historial meteorológico anual.
+// Node.js 18+. Variables: CUMULUS_PUSH_TOKEN, RENDER_URL, CUMULUS_DATA_DIR, HISTORY_YEARS.
 const fs = require('node:fs');
 const path = require('node:path');
 const CUMULUS_URL = (process.env.CUMULUS_URL || 'http://127.0.0.1:8998').replace(/\/+$/, '');
@@ -15,12 +15,12 @@ async function leerMes(year, month) {
     method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Accept': 'text/plain,text/html,*/*' },
     body: `<#MonthRainfall y="${year}" m="${month}">`, signal: AbortSignal.timeout(8000)
   });
-  const text = (await response.text()).trim();
-  if (!response.ok) throw new Error(`CumulusMX HTTP ${response.status}: ${text.slice(0,120)}`);
-  const match = text.replace(',', '.').match(/-?\d+(?:\.\d+)?/);
-  if (!match) throw new Error(`No se pudo interpretar MonthRainfall: ${text}`);
+  const body = (await response.text()).trim();
+  if (!response.ok) throw new Error(`CumulusMX HTTP ${response.status}: ${body.slice(0,120)}`);
+  const match = body.replace(',', '.').match(/-?\d+(?:\.\d+)?/);
+  if (!match) throw new Error(`No se pudo interpretar MonthRainfall: ${body}`);
   const value = Number(match[0]);
-  if (!Number.isFinite(value) || value < 0) throw new Error(`Lluvia no válida: ${text}`);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`Lluvia no válida: ${body}`);
   return Number(value.toFixed(2));
 }
 async function enviarLluvia(year, month, total_mm) {
@@ -32,42 +32,46 @@ function csv(line) {
   for (let i=0;i<line.length;i++) { const c=line[i]; if (c==='"' && line[i+1]==='"' && quoted) { value+='"'; i++; } else if (c==='"') quoted=!quoted; else if (c===',' && !quoted) { out.push(value.trim()); value=''; } else value+=c; }
   out.push(value.trim()); return out;
 }
-function numeric(value) { if (value === undefined || value === null || value.trim() === '') return null; const n=Number(value.replace(',', '.')); return Number.isFinite(n) ? n : null; }
-function dateIso(value, fallback) {
-  const s=(value||'').trim();
+function num(value) { if (value === undefined || value === null || String(value).trim() === '') return null; const n=Number(String(value).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; }
+function dateIso(value) {
+  const s=String(value||'').trim();
   let m=s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/); if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
   m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/); if(m) { let y=Number(m[3]); if(y<100)y+=2000; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
-  return fallback || null;
+  return null;
 }
-function parseLogFile(file, year) {
-  const base=path.basename(file); const fm=base.match(/^(\d{4})(\d{2})(\d{2})log\.txt$/i); if(!fm) return [];
-  const fallback=`${fm[1]}-${fm[2]}-${fm[3]}`; if(Number(fm[1])!==year) return [];
-  const lines=fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/).filter(Boolean); const result=[]; let headers=null;
+// CumulusMX en esta instalación guarda cada muestra en DOS líneas: fecha y, debajo, hora,timestamp,temp,humedad,rocío,viento,...
+function parseMonthlyLog(file, year) {
+  const base=path.basename(file); const fm=base.match(/^(\d{4})(\d{2})log\.txt$/i); if(!fm) return [];
+  if(Number(fm[1])!==year) return [];
+  const lines=fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const result=[]; let currentDate=null;
   for(const line of lines) {
-    const cols=csv(line); if(!cols.length) continue;
-    if(cols.some(c=>/^(date|fecha)$/i.test(c))) { headers=cols.map(c=>c.toLowerCase().replace(/[^a-z]/g,'')); continue; }
-    const hasHeader=!!headers;
-    const get=(names,index)=>{ if(hasHeader){ const i=headers.findIndex(h=>names.includes(h)); return i>=0?cols[i]:''; } return cols[index]??''; };
-    const fecha=dateIso(get(['date','fecha'],0),fallback); const hora=(get(['time','hora'],1)||'').trim();
-    if(!fecha || !fecha.startsWith(`${year}-`) || !/^\d{1,2}:\d{2}(?::\d{2})?$/.test(hora)) continue;
-    // Orden estándar de los logs de CumulusMX cuando no existe cabecera:
-    // fecha,hora,temp,humedad,punto de rocío,viento,rumbo,racha,rumbo racha,presión,lluvia hoy,tasa lluvia...
-    const pick=(names,index)=>numeric(get(names,index));
-    result.push({ fecha, hora: hora.length===5?`${hora}:00`:hora, temperatura:pick(['temperature','temp','temperatura'],2), humedad:pick(['humidity','humedad'],3), viento:pick(['windspeed','windspd','viento'],5), racha:pick(['recentwindgust','windgust','gust','racha'],7), presion:pick(['pressure','press','presion'],9), lluvia:pick(['raintoday','rainfalltoday','lluviahoy'],10) });
+    const parsedDate=dateIso(line);
+    if(parsedDate) { currentDate=parsedDate; continue; }
+    if(!currentDate || !currentDate.startsWith(`${year}-`)) continue;
+    const c=csv(line); if(c.length<8) continue;
+    const hora=(c[0]||'').trim(); if(!/^\d{1,2}:\d{2}(?::\d{2})?$/.test(hora)) continue;
+    // Formato observado: hora, timestamp Unix, temperatura, humedad, punto rocío,
+    // velocidad viento, rumbo, racha, rumbo racha, tasa lluvia, lluvia hoy, presión...
+    const hh=hora.length===5?`${hora}:00`:hora.padStart(8,'0');
+    result.push({ fecha:currentDate, hora:hh, temperatura:num(c[2]), humedad:num(c[3]), viento:num(c[5]), racha:num(c[7]), lluvia:num(c[10]), presion:num(c[11]) });
   }
   return result;
 }
 async function enviarHistorial(year) {
-  if (!fs.existsSync(DATA_DIR)) throw new Error(`No encuentro la carpeta de datos de CumulusMX: ${DATA_DIR}. Define CUMULUS_DATA_DIR con la ruta correcta.`);
-  const files=fs.readdirSync(DATA_DIR).filter(n=>/^\d{8}log\.txt$/i.test(n)).map(n=>path.join(DATA_DIR,n));
-  const rows=files.flatMap(file=>parseLogFile(file,year));
-  if (!rows.length) { console.warn(`${year}: no encontré registros en archivos YYYYMMDDlog.txt dentro de ${DATA_DIR}`); return; }
-  const unique=new Map(rows.map(r=>[`${r.fecha} ${r.hora}`,r])); const datos=Array.from(unique.values()).sort((a,b)=>`${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+  if (!fs.existsSync(DATA_DIR)) throw new Error(`No encuentro ${DATA_DIR}. Comprueba CUMULUS_DATA_DIR.`);
+  const files=fs.readdirSync(DATA_DIR).filter(n=>/^\d{6}log\.txt$/i.test(n)).map(n=>path.join(DATA_DIR,n));
+  const rows=files.flatMap(file=>parseMonthlyLog(file,year));
+  if (!rows.length) { console.warn(`${year}: no encontré muestras en archivos YYYYMMlog.txt dentro de ${DATA_DIR}`); return; }
+  const unique=new Map(rows.map(r=>[`${r.fecha} ${r.hora}`,r]));
+  const datos=Array.from(unique.values()).sort((a,b)=>`${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
   for(let i=0;i<datos.length;i+=3000) {
     const response=await fetch(`${RENDER_URL}/api/cumulus/historial`, { method:'POST', headers:{'Content-Type':'application/json','x-cumulus-token':TOKEN}, body:JSON.stringify({year,datos:datos.slice(i,i+3000)}), signal:AbortSignal.timeout(30000) });
-    const body=await response.text(); if(!response.ok) throw new Error(`Render historial HTTP ${response.status}: ${body.slice(0,200)}`);
+    const body=await response.text(); if(!response.ok) throw new Error(`Render historial HTTP ${response.status}: ${body.slice(0,220)}`);
+    let info={}; try{info=JSON.parse(body)}catch{}
+    console.log(`Historial ${year}: lote enviado (${info.recibidos ?? Math.min(3000,datos.length-i)} registros; total servidor ${info.total ?? 'pendiente'}).`);
   }
-  console.log(`${year}: ${datos.length} registros históricos enviados a Render.`);
+  console.log(`${year}: ${datos.length} registros leídos de CumulusMX y enviados a Render.`);
 }
 async function ciclo() {
   const now=new Date(); const year=now.getFullYear();
