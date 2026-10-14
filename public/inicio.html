@@ -77,10 +77,6 @@
   }
 </style>
 
-<style>
-/* Botón de historial oculto; se conserva su HTML y JavaScript. */
-#btn-historial { display: none !important; }
-</style>
 </head>
 <body class="px-2 sm:px-4">
   <h1 class="text-4xl font-bold text-white mb-4">ALFARNATE</h1>
@@ -266,7 +262,7 @@
           ctx.clearRect(0, 0, canvas.width, canvas.height);
         })
         .catch(err => {
-          resultado.textContent = "❌ No se pudo obtener, inténtalo más tarde.";
+          resultado.textContent = "❌ No se pudo obtener la lluvia de CumulusMX. Comprueba que CumulusMX está activo y que CUMULUS_URL apunta a él.";
           console.error("⚠️ Error al obtener la lluvia mensual desde CumulusMX:", err);
         })
         .finally(() => {
@@ -314,21 +310,25 @@
 
 <script>
   (function(){
-    function setUrl(u){
-      var btn = document.getElementById('btn-historial');
-      if (btn) btn.onclick = function(){ window.location.href = u; };
-    }
-    // Fallback por si /historial-url no existe
-    var fallback = 'https://prueba2-production-50d4.up.railway.app/';
-    fetch('/historial-url')
-      .then(function(r){ return r.ok ? r.json() : { url: fallback }; })
-      .then(function(cfg){ setUrl((cfg && cfg.url) || fallback); })
-      .catch(function(){ setUrl(fallback); });
+    var btn = document.getElementById('btn-historial');
+    if (btn) btn.addEventListener('click', function(){ window.location.href = '/historial.html'; });
   })();
 </script>
 
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
