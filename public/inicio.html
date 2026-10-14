@@ -173,7 +173,19 @@
 
         document.getElementById('rainfall').textContent = `${metric.precipTotal ?? '—'} mm`;
         document.getElementById('pressure').textContent = `${metric.pressure ?? '—'} hPa`;
-        document.getElementById('uv-index').textContent = `${obs.uv ?? '—'}`;
+        // El UV no lo mide la estación; se consulta al servidor (Open-Meteo).
+        document.getElementById('uv-index').textContent = '…';
+        fetch(`${window.RAIL_API_BASE}/api/uv/current`, FETCH_OPTS)
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+          .then(uvData => {
+            const uv = uvData && uvData.uv;
+            document.getElementById('uv-index').textContent =
+              Number.isFinite(Number(uv)) ? Number(uv).toFixed(1) : '—';
+          })
+          .catch(err => {
+            console.warn('No se pudo obtener el índice UV:', err);
+            document.getElementById('uv-index').textContent = '—';
+          });
         const when = obs.obsTimeLocal || obs.obsTimeUtc;
         document.getElementById('time').textContent = when ? new Date(when).toLocaleString() : '—';
 
@@ -254,7 +266,7 @@
           ctx.clearRect(0, 0, canvas.width, canvas.height);
         })
         .catch(err => {
-          resultado.textContent = "❌ No está disponible inténtelo más tarde";
+          resultado.textContent = "❌ No se pudo obtener la lluvia de CumulusMX. Comprueba que CumulusMX está activo y que CUMULUS_URL apunta a él.";
           console.error("⚠️ Error al obtener la lluvia mensual desde CumulusMX:", err);
         })
         .finally(() => {
@@ -317,6 +329,17 @@
 
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
 
 
 
