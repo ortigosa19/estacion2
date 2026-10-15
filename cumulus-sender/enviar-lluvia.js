@@ -1,82 +1,187 @@
-// Agente CumulusMX -> Render: lluvia mensual + historial meteorológico anual.
-// Node.js 18+. Variables: CUMULUS_PUSH_TOKEN, RENDER_URL, CUMULUS_DATA_DIR, HISTORY_YEARS.
-const fs = require('node:fs');
-const path = require('node:path');
+// Agente CumulusMX -> Render: lluvia mensual + historial detallado.
+// Requiere Node.js 18 o superior.
+// Configura CUMULUS_PUSH_TOKEN como variable de entorno; debe coincidir con Render.
+
+const fs = require('fs');
+const path = require('path');
+
 const CUMULUS_URL = (process.env.CUMULUS_URL || 'http://127.0.0.1:8998').replace(/\/+$/, '');
 const RENDER_URL = (process.env.RENDER_URL || 'https://estacion2.onrender.com').replace(/\/+$/, '');
 const TOKEN = process.env.CUMULUS_PUSH_TOKEN || '';
 const DATA_DIR = process.env.CUMULUS_DATA_DIR || 'C:\\CumulusMX\\data';
-const HISTORY_YEARS = (process.env.HISTORY_YEARS || String(new Date().getFullYear())).split(',').map(x => Number(x.trim())).filter(y => Number.isInteger(y) && y >= 2000 && y <= 2100);
 const INTERVAL_MS = 10 * 60 * 1000;
-if (!TOKEN) { console.error('Falta CUMULUS_PUSH_TOKEN. Debe coincidir con la variable configurada en Render.'); process.exit(1); }
+const HISTORY_BATCH_SIZE = 500;
+
+if (!TOKEN) {
+  console.error('Falta CUMULUS_PUSH_TOKEN. Debe coincidir con la variable configurada en Render.');
+  process.exit(1);
+}
+
+function numero(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  const n = Number(String(v).trim().replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+function fechaLog(texto) {
+  // CumulusMX: DD/MM/YY HH:mm
+  const m = String(texto || '').trim().match(/^(\d{2})\/(\d{2})\/(\d{2,4})\s+(\d{2}:\d{2}(?::\d{2})?)/);
+  if (!m) return null;
+  let year = Number(m[3]);
+  if (m[3].length === 2) year += year >= 70 ? 1900 : 2000;
+  const fecha = `${year}-${m[2]}-${m[1]}`;
+  return { year, fecha, hora: m[4].length === 5 ? `${m[4]}:00` : m[4] };
+}
+
+function parsearLinea(linea) {
+  const campos = String(linea).trim().split(',');
+  if (campos.length < 11) return null;
+  const f = fechaLog(campos[0]);
+  if (!f) return null;
+
+  // Formato CumulusMX: fecha/hora, timestamp, temp, humedad, rocío,
+  // velocidad viento, racha, rumbo, tasa lluvia, lluvia hoy, presión...
+  return {
+    year: f.year,
+    registro: {
+      fecha: f.fecha,
+      hora: f.hora,
+      temperatura: numero(campos[2]),
+      humedad: numero(campos[3]),
+      viento: numero(campos[5]),
+      racha: numero(campos[6]),
+      lluvia: numero(campos[9]),
+      presion: numero(campos[10])
+    }
+  };
+}
 
 async function leerMes(year, month) {
-  const response = await fetch(`${CUMULUS_URL}/api/tags/process.txt`, {
-    method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Accept': 'text/plain,text/html,*/*' },
-    body: `<#MonthRainfall y="${year}" m="${month}">`, signal: AbortSignal.timeout(8000)
+  const url = `${CUMULUS_URL}/api/tags/process.txt`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Accept': 'text/plain,text/html,*/*' },
+    body: `<#MonthRainfall y="${year}" m="${month}">`,
+    signal: AbortSignal.timeout(8000)
   });
-  const body = (await response.text()).trim();
-  if (!response.ok) throw new Error(`CumulusMX HTTP ${response.status}: ${body.slice(0,120)}`);
-  const match = body.replace(',', '.').match(/-?\d+(?:\.\d+)?/);
-  if (!match) throw new Error(`No se pudo interpretar MonthRainfall: ${body}`);
+  const text = (await response.text()).trim();
+  if (!response.ok) throw new Error(`CumulusMX HTTP ${response.status}: ${text.slice(0, 120)}`);
+  const match = text.replace(',', '.').match(/-?\d+(?:\.\d+)?/);
+  if (!match) throw new Error(`No se pudo interpretar MonthRainfall: ${text}`);
   const value = Number(match[0]);
-  if (!Number.isFinite(value) || value < 0) throw new Error(`Lluvia no válida: ${body}`);
+  if (!Number.isFinite(value) || value < 0) throw new Error(`Lluvia no válida: ${text}`);
   return Number(value.toFixed(2));
 }
+
 async function enviarLluvia(year, month, total_mm) {
-  const response = await fetch(`${RENDER_URL}/api/cumulus/lluvia`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-cumulus-token': TOKEN }, body: JSON.stringify({ year, month, total_mm }), signal: AbortSignal.timeout(15000) });
-  const body = await response.text(); if (!response.ok) throw new Error(`Render lluvia HTTP ${response.status}: ${body.slice(0,180)}`);
+  const response = await fetch(`${RENDER_URL}/api/cumulus/lluvia`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-cumulus-token': TOKEN },
+    body: JSON.stringify({ year, month, total_mm }),
+    signal: AbortSignal.timeout(15000)
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`Render lluvia HTTP ${response.status}: ${body.slice(0, 180)}`);
 }
-function csv(line) {
-  const out = []; let value = '', quoted = false;
-  for (let i=0;i<line.length;i++) { const c=line[i]; if (c==='"' && line[i+1]==='"' && quoted) { value+='"'; i++; } else if (c==='"') quoted=!quoted; else if (c===',' && !quoted) { out.push(value.trim()); value=''; } else value+=c; }
-  out.push(value.trim()); return out;
+
+async function enviarLoteHistorial(year, datos) {
+  const response = await fetch(`${RENDER_URL}/api/cumulus/historial`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-cumulus-token': TOKEN },
+    body: JSON.stringify({ year, datos }),
+    signal: AbortSignal.timeout(30000)
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`Render historial HTTP ${response.status}: ${body.slice(0, 250)}`);
+  let result;
+  try { result = JSON.parse(body); } catch { result = { respuesta: body }; }
+  console.log(`${new Date().toLocaleString('es-ES')} | Historial ${year}: ${result.recibidos ?? datos.length} registros enviados; total en Render: ${result.total ?? '?'}`);
 }
-function num(value) { if (value === undefined || value === null || String(value).trim() === '') return null; const n=Number(String(value).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; }
-function dateIso(value) {
-  const s=String(value||'').trim();
-  let m=s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/); if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
-  m=s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/); if(m) { let y=Number(m[3]); if(y<100)y+=2000; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
-  return null;
+
+function listarArchivosLog() {
+  if (!fs.existsSync(DATA_DIR)) throw new Error(`No existe la carpeta de logs: ${DATA_DIR}`);
+  return fs.readdirSync(DATA_DIR)
+    .filter(name => /^\d{6}log\.txt$/i.test(name))
+    .sort()
+    .map(name => path.join(DATA_DIR, name));
 }
-// CumulusMX en esta instalación guarda cada muestra en DOS líneas: fecha y, debajo, hora,timestamp,temp,humedad,rocío,viento,...
-function parseMonthlyLog(file, year) {
-  const base=path.basename(file); const fm=base.match(/^(\d{4})(\d{2})log\.txt$/i); if(!fm) return [];
-  if(Number(fm[1])!==year) return [];
-  const lines=fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  const result=[]; let currentDate=null;
-  for(const line of lines) {
-    const parsedDate=dateIso(line);
-    if(parsedDate) { currentDate=parsedDate; continue; }
-    if(!currentDate || !currentDate.startsWith(`${year}-`)) continue;
-    const c=csv(line); if(c.length<8) continue;
-    const hora=(c[0]||'').trim(); if(!/^\d{1,2}:\d{2}(?::\d{2})?$/.test(hora)) continue;
-    // Formato observado: hora, timestamp Unix, temperatura, humedad, punto rocío,
-    // velocidad viento, rumbo, racha, rumbo racha, tasa lluvia, lluvia hoy, presión...
-    const hh=hora.length===5?`${hora}:00`:hora.padStart(8,'0');
-    result.push({ fecha:currentDate, hora:hh, temperatura:num(c[2]), humedad:num(c[3]), viento:num(c[5]), racha:num(c[7]), lluvia:num(c[10]), presion:num(c[11]) });
+
+function cargarHistorial({ soloReciente = false } = {}) {
+  const porAnio = new Map();
+  const corte = new Date();
+  corte.setDate(corte.getDate() - 2);
+  const corteISO = `${corte.getFullYear()}-${String(corte.getMonth() + 1).padStart(2, '0')}-${String(corte.getDate()).padStart(2, '0')}`;
+
+  for (const archivo of listarArchivosLog()) {
+    const texto = fs.readFileSync(archivo, 'utf8');
+    for (const linea of texto.split(/\r?\n/)) {
+      const parsed = parsearLinea(linea);
+      if (!parsed) continue;
+      if (soloReciente && parsed.registro.fecha < corteISO) continue;
+      if (!porAnio.has(parsed.year)) porAnio.set(parsed.year, []);
+      porAnio.get(parsed.year).push(parsed.registro);
+    }
   }
-  return result;
-}
-async function enviarHistorial(year) {
-  if (!fs.existsSync(DATA_DIR)) throw new Error(`No encuentro ${DATA_DIR}. Comprueba CUMULUS_DATA_DIR.`);
-  const files=fs.readdirSync(DATA_DIR).filter(n=>/^\d{6}log\.txt$/i.test(n)).map(n=>path.join(DATA_DIR,n));
-  const rows=files.flatMap(file=>parseMonthlyLog(file,year));
-  if (!rows.length) { console.warn(`${year}: no encontré muestras en archivos YYYYMMlog.txt dentro de ${DATA_DIR}`); return; }
-  const unique=new Map(rows.map(r=>[`${r.fecha} ${r.hora}`,r]));
-  const datos=Array.from(unique.values()).sort((a,b)=>`${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
-  for(let i=0;i<datos.length;i+=3000) {
-    const response=await fetch(`${RENDER_URL}/api/cumulus/historial`, { method:'POST', headers:{'Content-Type':'application/json','x-cumulus-token':TOKEN}, body:JSON.stringify({year,datos:datos.slice(i,i+3000)}), signal:AbortSignal.timeout(30000) });
-    const body=await response.text(); if(!response.ok) throw new Error(`Render historial HTTP ${response.status}: ${body.slice(0,220)}`);
-    let info={}; try{info=JSON.parse(body)}catch{}
-    console.log(`Historial ${year}: lote enviado (${info.recibidos ?? Math.min(3000,datos.length-i)} registros; total servidor ${info.total ?? 'pendiente'}).`);
+
+  for (const [year, rows] of porAnio) {
+    const unicos = new Map();
+    for (const row of rows) unicos.set(`${row.fecha} ${row.hora}`, row);
+    porAnio.set(year, Array.from(unicos.values()).sort((a, b) =>
+      `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`)
+    ));
   }
-  console.log(`${year}: ${datos.length} registros leídos de CumulusMX y enviados a Render.`);
+  return porAnio;
 }
-async function ciclo() {
-  const now=new Date(); const year=now.getFullYear();
-  for(let month=1;month<=now.getMonth()+1;month++) try { const total_mm=await leerMes(year,month); await enviarLluvia(year,month,total_mm); console.log(`${year}-${String(month).padStart(2,'0')}: ${total_mm} mm enviado a Render`); } catch(e) { console.error(`Lluvia ${year}-${String(month).padStart(2,'0')}: ${e.message}`); }
-  for(const y of HISTORY_YEARS) try { await enviarHistorial(y); } catch(e) { console.error(`Historial ${y}: ${e.message}`); }
+
+async function sincronizarHistorial(soloReciente = false) {
+  try {
+    const porAnio = cargarHistorial({ soloReciente });
+    if (!porAnio.size) {
+      console.log(`No se encontraron registros ${soloReciente ? 'recientes' : 'históricos'} en ${DATA_DIR}`);
+      return;
+    }
+    for (const [year, rows] of porAnio) {
+      for (let i = 0; i < rows.length; i += HISTORY_BATCH_SIZE) {
+        await enviarLoteHistorial(year, rows.slice(i, i + HISTORY_BATCH_SIZE));
+      }
+      console.log(`Historial local ${year}: ${rows.length} registros leídos.`);
+    }
+  } catch (err) {
+    console.error(`Error al sincronizar historial: ${err.message}`);
+  }
 }
-async function main(){ console.log(`Agente CumulusMX iniciado. Origen: ${CUMULUS_URL} | Destino: ${RENDER_URL} | Datos: ${DATA_DIR} | Años: ${HISTORY_YEARS.join(',')}`); await ciclo(); setInterval(ciclo,INTERVAL_MS); }
-main().catch(e=>{console.error(e);process.exit(1);});
+
+async function cicloLluvia() {
+  const now = new Date();
+  const year = now.getFullYear();
+  for (let month = 1; month <= now.getMonth() + 1; month++) {
+    try {
+      const total_mm = await leerMes(year, month);
+      await enviarLluvia(year, month, total_mm);
+      console.log(`${new Date().toLocaleString('es-ES')} | ${year}-${String(month).padStart(2, '0')}: ${total_mm} mm enviado a Render`);
+    } catch (err) {
+      console.error(`${year}-${String(month).padStart(2, '0')}: ${err.message}`);
+    }
+  }
+}
+
+async function main() {
+  console.log(`Agente CumulusMX iniciado. Origen: ${CUMULUS_URL} | Destino: ${RENDER_URL}`);
+  console.log(`Carpeta de logs: ${DATA_DIR}`);
+
+  // Primera ejecución: enviar todo el historial disponible.
+  await sincronizarHistorial(false);
+  await cicloLluvia();
+
+  // Cada 10 minutos: mantener la lluvia mensual y actualizar los últimos 3 días.
+  setInterval(async () => {
+    await cicloLluvia();
+    await sincronizarHistorial(true);
+  }, INTERVAL_MS);
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
+
