@@ -9,7 +9,7 @@ const CUMULUS_URL = (process.env.CUMULUS_URL || 'http://127.0.0.1:8998').replace
 const RENDER_URL = (process.env.RENDER_URL || 'https://estacion2.onrender.com').replace(/\/+$/, '');
 const TOKEN = process.env.CUMULUS_PUSH_TOKEN || '';
 const DATA_DIR = process.env.CUMULUS_DATA_DIR || 'C:\\CumulusMX\\data';
-const INTERVAL_MS = 10 * 60 * 1000;
+const INTERVAL_MS = 1 * 60 * 1000;
 const HISTORY_BATCH_SIZE = 500;
 
 if (!TOKEN) {
@@ -173,7 +173,7 @@ async function main() {
   await sincronizarHistorial(false);
   await cicloLluvia();
 
-  // Cada 10 minutos: mantener la lluvia mensual y actualizar los últimos 3 días.
+  // Cada 1 minuto: mantener la lluvia mensual y actualizar los últimos 3 días.
   setInterval(async () => {
     await cicloLluvia();
     await sincronizarHistorial(true);
@@ -184,4 +184,5 @@ main().catch(err => {
   console.error(err);
   process.exit(1);
 });
+
 
