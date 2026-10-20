@@ -124,6 +124,9 @@
     <button id="btn-historial" class="top-right-button mt-4 w-full sm:w-auto">📊 Ver Historial</button>
   </div>
 
+  <!-- Solo aparece cuando el histórico de CumulusMX indica lluvia ayer. -->
+  <p id="lluvia-dia-anterior" class="text-cyan-300 text-lg font-bold text-center mt-4 mb-6" hidden></p>
+
   <!-- Overlay por sesión cerrada -->
 <script>
     // =========================
@@ -315,8 +318,63 @@
   })();
 </script>
 
+<script>
+  // Consulta el histórico de CumulusMX en este mismo servidor.
+  (async function cargarLluviaDiaAnterior() {
+    const linea = document.getElementById('lluvia-dia-anterior');
+    if (!linea) return;
+    try {
+      const respuesta = await fetch('/api/lluvia/dia-anterior', { cache: 'no-store' });
+      if (!respuesta.ok) return;
+      const dato = await respuesta.json();
+      const total = Number(dato.total_mm);
+      if (dato.ok !== true || dato.mostrar !== true || !Number.isFinite(total) || total <= 0) return;
+      const [year, month, day] = String(dato.fecha || '').split('-');
+      if (!year || !month || !day) return;
+      linea.textContent = `🌧️ Lluvia total del día anterior (${day}/${month}/${year}): ${total.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} mm`;
+      linea.hidden = false;
+    } catch (error) {
+      console.warn('No se pudo cargar la lluvia del día anterior:', error);
+    }
+  })();
+</script>
+
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
