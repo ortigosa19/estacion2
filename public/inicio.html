@@ -331,7 +331,7 @@
       if (dato.ok !== true || dato.mostrar !== true || !Number.isFinite(total) || total <= 0) return;
       const [year, month, day] = String(dato.fecha || '').split('-');
       if (!year || !month || !day) return;
-      linea.textContent = `🌧️ Lluvia total del día anterior (${day}/${month}/${year}): ${total.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} mm`;
+      linea.textContent = `🌧️ Lluvia total del día  (${day}/${month}/${year}): ${total.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} mm`;
       linea.hidden = false;
     } catch (error) {
       console.warn('No se pudo cargar la lluvia del día anterior:', error);
