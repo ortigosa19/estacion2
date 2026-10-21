@@ -224,7 +224,7 @@ app.get('/api/lluvia/dia-anterior', (req, res) => {
     }).formatToParts(new Date());
     const valor = tipo => partes.find(p => p.type === tipo)?.value;
     const hoy = new Date(Date.UTC(Number(valor('year')), Number(valor('month')) - 1, Number(valor('day'))));
-    hoy.setUTCDate(hoy.getUTCDate() - 1);
+    hoy.setUTCDate(hoy.getUTCDate() - 2); // El valor de lluviaHoy del log queda asociado al día anterior; corregir desfase de fecha.
     const pad = n => String(n).padStart(2, '0');
     const fecha = `${hoy.getUTCFullYear()}-${pad(hoy.getUTCMonth() + 1)}-${pad(hoy.getUTCDate())}`;
     const year = hoy.getUTCFullYear();
@@ -410,6 +410,19 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
