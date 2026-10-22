@@ -215,27 +215,30 @@ app.get('/api/cumulus/historial', (req, res) => {
   res.set('Cache-Control', 'no-store').json({ ok: true, year, desde: `${year}-01-01`, hasta: `${year}-12-31`, total: datos.length, datos });
 });
 
-/* ============ Lluvia total del día anterior desde CumulusMX ============ */
+/* ============ Días con lluvia desde el historial CumulusMX ============ */
 app.get('/api/lluvia/dia-anterior', (req, res) => {
   try {
-    // Fecha de España, para que Render use el mismo día que la estación.
-    const partes = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit'
-    }).formatToParts(new Date());
-    const valor = tipo => partes.find(p => p.type === tipo)?.value;
-    const hoy = new Date(Date.UTC(Number(valor('year')), Number(valor('month')) - 1, Number(valor('day'))));
-    hoy.setUTCDate(hoy.getUTCDate() - 2); // El valor de lluviaHoy del log queda asociado al día anterior; corregir desfase de fecha.
-    const pad = n => String(n).padStart(2, '0');
-    const fecha = `${hoy.getUTCFullYear()}-${pad(hoy.getUTCMonth() + 1)}-${pad(hoy.getUTCDate())}`;
-    const year = hoy.getUTCFullYear();
-    const filas = readHistory(year).filter(row => row.fecha === fecha && row.lluvia !== null && row.lluvia !== undefined && row.lluvia !== '');
-    const valores = filas.map(row => Number(row.lluvia)).filter(n => Number.isFinite(n) && n >= 0);
-    // En el log de CumulusMX, el campo lluvia corresponde a la lluvia acumulada de ese día.
-    const total_mm = valores.length ? Math.max(...valores) : 0;
-    res.set('Cache-Control', 'no-store').json({
-      ok: true, fecha, total_mm: Number(total_mm.toFixed(2)), mostrar: total_mm > 0,
-      origen: 'Historial CumulusMX'
-    });
+    // El campo "lluvia hoy" del log llega asociado a la fecha siguiente.
+    // Se corrige una sola vez por registro y se guardan solo días con lluvia.
+    const currentYear = Number(new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid', year: 'numeric'
+    }).format(new Date()));
+    const porDia = new Map();
+    for (const year of [currentYear - 1, currentYear]) {
+      for (const row of readHistory(year)) {
+        if (!row || !/^\d{4}-\d{2}-\d{2}$/.test(String(row.fecha || ''))) continue;
+        const valor = Number(row.lluvia);
+        if (!Number.isFinite(valor) || valor <= 0) continue;
+        // La lluvia acumulada registrada en la línea corresponde al día anterior.
+        const fechaLog = new Date(`${row.fecha}T12:00:00Z`);
+        fechaLog.setUTCDate(fechaLog.getUTCDate() - 1);
+        const fecha = `${fechaLog.getUTCFullYear()}-${String(fechaLog.getUTCMonth() + 1).padStart(2, '0')}-${String(fechaLog.getUTCDate()).padStart(2, '0')}`;
+        porDia.set(fecha, Math.max(porDia.get(fecha) || 0, valor));
+      }
+    }
+    const datos = Array.from(porDia, ([fecha, total_mm]) => ({ fecha, total_mm: Number(total_mm.toFixed(2)) }))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha));
+    res.set('Cache-Control', 'no-store').json({ ok: true, datos, mostrar: datos.length > 0, origen: 'Historial CumulusMX' });
   } catch (e) {
     console.error('Error /api/lluvia/dia-anterior:', e);
     res.status(500).json({ ok: false, error: 'calc_failed' });
@@ -410,6 +413,20 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
