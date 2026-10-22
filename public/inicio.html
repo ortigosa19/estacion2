@@ -328,7 +328,7 @@
       if (!respuesta.ok) return;
       const resultado = await respuesta.json();
       if (resultado.ok !== true || !Array.isArray(resultado.datos)) return;
-      const dias = resultado.datos.filter(d => Number(d.total_mm) > 0);
+      const dias = resultado.datos.filter(d => Number(d.total_mm) > 0).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)));
       if (!dias.length) return;
       contenedor.replaceChildren();
       for (const dato of dias) {
@@ -348,6 +348,74 @@
 
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
