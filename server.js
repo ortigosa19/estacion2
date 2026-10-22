@@ -236,8 +236,18 @@ app.get('/api/lluvia/dia-anterior', (req, res) => {
         porDia.set(fecha, Math.max(porDia.get(fecha) || 0, valor));
       }
     }
-    const datos = Array.from(porDia, ([fecha, total_mm]) => ({ fecha, total_mm: Number(total_mm.toFixed(2)) }))
-      .sort((a, b) => b.fecha.localeCompare(a.fecha));
+    // Orden cronológico ascendente. El log puede repetir el acumulado del día
+    // anterior tras el cambio de fecha; conservamos una sola aparición del mismo
+    // acumulado consecutivo, asignada a la fecha más reciente en la que figura.
+    const ordenados = Array.from(porDia, ([fecha, total_mm]) => ({ fecha, total_mm: Number(total_mm.toFixed(2)) }))
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const datos = [];
+    for (let i = 0; i < ordenados.length; i++) {
+      const actual = ordenados[i];
+      const siguiente = ordenados[i + 1];
+      if (siguiente && Math.abs(siguiente.total_mm - actual.total_mm) < 0.01) continue;
+      datos.push(actual);
+    }
     res.set('Cache-Control', 'no-store').json({ ok: true, datos, mostrar: datos.length > 0, origen: 'Historial CumulusMX' });
   } catch (e) {
     console.error('Error /api/lluvia/dia-anterior:', e);
@@ -413,6 +423,20 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () =>
   console.log(`🚀 http://0.0.0.0:${PORT} — listo (rutas: /verificar-sesion, /api/weather/*, /api/lluvia/total/year)`)
 );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
